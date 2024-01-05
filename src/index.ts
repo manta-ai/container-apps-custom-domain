@@ -21,6 +21,6 @@ main(config)
     process.exit(0);
   })
   .catch((error: Error) => {
-    core.setFailed(error.message);
+    core.setFailed(error);
     process.exit(1);
   });
