@@ -23,7 +23,8 @@ export const validateDns = async (
     `asuid.${config.dnsName}`,
     'TXT',
     {
-      txtRecords: [{ value: [containerAppContext.customDomainVerificationId] }]
+      txtRecords: [{ value: [containerAppContext.customDomainVerificationId] }],
+      ttl: 3600
     }
   );
   console.log(`Successfully validated asuid.${config.fqdn}.`);

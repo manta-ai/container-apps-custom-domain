@@ -61430,7 +61430,8 @@ const validateDns = async (config, dns, containerAppContext) => {
     console.log(`Successfully validated ${config.fqdn}.`);
     console.log(`Checking that DNS record asuid.${config.fqdn} exists and is valid...`);
     await dns.recordSets.createOrUpdate(config.dnsResourceGroupName, config.dnsZoneName, `asuid.${config.dnsName}`, 'TXT', {
-        txtRecords: [{ value: [containerAppContext.customDomainVerificationId] }]
+        txtRecords: [{ value: [containerAppContext.customDomainVerificationId] }],
+        ttl: 3600
     });
     console.log(`Successfully validated asuid.${config.fqdn}.`);
 };
