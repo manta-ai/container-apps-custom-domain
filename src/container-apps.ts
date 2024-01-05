@@ -5,7 +5,7 @@ import {
   ManagedCertificate,
   ManagedEnvironment
 } from '@azure/arm-appcontainers';
-import { Config } from './input';
+import { Config } from './config';
 
 export interface ContainerAppContext {
   app: ContainerApp;
