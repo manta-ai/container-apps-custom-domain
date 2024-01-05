@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Make sure that the package compiles before committing.
+npm run package
+git add dist
+exit 0

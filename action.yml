@@ -1,0 +1,30 @@
+name: 'Azure Container Apps Custom Domain'
+description: 'Adds a custom domain to an existing Azure Container App'
+inputs:
+  subscription-id:
+    description: 'The Azure subscription ID.'
+    required: false
+  region:
+    description: 'The Azure region where the Azure Container App is located.'
+    required: true
+  dns-resource-group-name:
+    description: 'The name of the resource group containing the DNS zone.'
+    required: true
+  dns-zone:
+    description: 'The DNS zone to add the record to.'
+    required: true
+  dns-name:
+    description: 'The DNS name of the record that will be created. For example, if the DNS zone is example.com and the DNS name is www, the resulting DNS record will be www.example.com.'
+    required: true
+  container-app-name:
+    description: 'The name of the Azure Container App.'
+    required: true
+  container-app-resource-group-name:
+    description: 'The name of the resource group containing the Azure Container App.'
+    required: true
+  container-app-environment-name:
+    description: 'The name of the environment containing the Azure Container App.'
+    required: true
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
