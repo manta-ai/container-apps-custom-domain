@@ -2,7 +2,7 @@ name: 'Azure Container Apps Custom Domain'
 description: 'Adds a custom domain to an existing Azure Container App'
 inputs:
   subscription-id:
-    description: 'The Azure subscription ID.'
+    description: 'Your Azure subscription ID. If not provided, the action will attempt to read the value from the environment variable `AZURE_SUBSCRIPTION_ID`.'
     required: false
   region:
     description: 'The Azure region where the Azure Container App is located.'
@@ -23,7 +23,7 @@ inputs:
     description: 'The name of the resource group containing the Azure Container App.'
     required: true
   container-app-environment-name:
-    description: 'The name of the environment containing the Azure Container App.'
+    description: 'The name of the Container Apps Environment containing the Azure Container App.'
     required: true
 runs:
   using: 'node20'
