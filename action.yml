@@ -1,5 +1,8 @@
 name: 'Azure Container Apps Custom Domain'
 description: 'Adds a custom domain to an existing Azure Container App'
+branding:
+  color: 'blue'
+  icon: 'box'
 inputs:
   subscription-id:
     description: 'Your Azure subscription ID. If not provided, the action will attempt to read the value from the environment variable `AZURE_SUBSCRIPTION_ID`.'
