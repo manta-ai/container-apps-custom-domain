@@ -61701,7 +61701,7 @@ try {
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.validateVerificationRecord = exports.validateAliasRecord = exports.bindCertificate = exports.generateCertificate = exports.bindHostname = exports.runAction = void 0;
+exports.validateVerificationRecord = exports.validateAliasRecord = exports.generateCertificate = exports.bindHostname = exports.runAction = void 0;
 const runAction = async (message, action) => {
     process.stdout.write(`${message}...`);
     try {
@@ -61715,24 +61715,32 @@ const runAction = async (message, action) => {
     }
 };
 exports.runAction = runAction;
-const bindHostname = async (config, containerApps) => {
+const bindHostname = async (config, containerApps, containerAppContext, certificate) => {
+    const bindingType = certificate ? 'SniEnabled' : 'Disabled';
+    const customDomain = {
+        name: config.fqdn,
+        certificateId: certificate?.id,
+        bindingType
+    };
+    if (containerAppContext.customDomains.some(domain => domain.name === customDomain.name)) {
+        return;
+    }
+    const customDomains = [...containerAppContext.customDomains, customDomain];
     const containerAppEnvelope = {
         location: config.region,
         configuration: {
-            ingress: {
-                customDomains: [
-                    {
-                        name: config.fqdn,
-                        bindingType: 'Disabled'
-                    }
-                ]
-            }
+            ingress: { customDomains }
         }
     };
     await containerApps.beginUpdateAndWait(config.containerAppResourceGroupName, config.containerAppName, containerAppEnvelope);
 };
 exports.bindHostname = bindHostname;
-const generateCertificate = async (config, managedCertificates) => {
+const generateCertificate = async (config, managedCertificates, containerAppContext) => {
+    const existingCertificate = containerAppContext.certificates.find(certificate => certificate.properties?.subjectName === config.fqdn ||
+        certificate.properties?.subjectAlternativeNames?.includes(config.fqdn));
+    if (existingCertificate != null) {
+        return existingCertificate;
+    }
     const timestamp = Math.floor(Date.now() / 1000);
     const certificateName = `${config.containerAppName}-mc-${timestamp}`;
     const managedCertificateEnvelope = {
@@ -61745,24 +61753,6 @@ const generateCertificate = async (config, managedCertificates) => {
     return await managedCertificates.beginCreateOrUpdateAndWait(config.containerAppResourceGroupName, config.containerAppEnvironmentName, certificateName, { managedCertificateEnvelope });
 };
 exports.generateCertificate = generateCertificate;
-const bindCertificate = async (config, containerApps, certificate) => {
-    const containerAppEnvelope = {
-        location: config.region,
-        configuration: {
-            ingress: {
-                customDomains: [
-                    {
-                        certificateId: certificate.id,
-                        name: config.fqdn,
-                        bindingType: 'SniEnabled'
-                    }
-                ]
-            }
-        }
-    };
-    await containerApps.beginUpdateAndWait(config.containerAppResourceGroupName, config.containerAppName, containerAppEnvelope);
-};
-exports.bindCertificate = bindCertificate;
 const validateAliasRecord = async (config, dns, containerAppContext) => {
     await dns.recordSets.createOrUpdate(config.dnsResourceGroupName, config.dnsZoneName, config.dnsName, 'CNAME', {
         cnameRecord: {
@@ -61937,12 +61927,13 @@ exports.getConfig = getConfig;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.hasExistingCertificate = exports.getContainerAppContext = void 0;
+exports.getContainerAppContext = void 0;
 const getContainerAppContext = async (containerApps, config) => {
     const app = await containerApps.containerApps.get(config.containerAppResourceGroupName, config.containerAppName);
     if (app.customDomainVerificationId == null) {
         throw new Error(`Container app ${app.name} does not have a custom domain verification ID.`);
     }
+    const customDomains = app.configuration?.ingress?.customDomains || [];
     const appEnvironment = await containerApps.managedEnvironments.get(config.containerAppResourceGroupName, config.containerAppEnvironmentName);
     if (appEnvironment.defaultDomain == null) {
         throw new Error(`Container app environment ${appEnvironment.defaultDomain} does not have a default domain.`);
@@ -61956,27 +61947,12 @@ const getContainerAppContext = async (containerApps, config) => {
         app,
         appEnvironment,
         certificates,
+        customDomains,
         customDomainVerificationId: app.customDomainVerificationId,
         defaultDomain: appEnvironment.defaultDomain
     };
 };
 exports.getContainerAppContext = getContainerAppContext;
-const hasExistingCertificate = async (containerAppContext, { fqdn }) => {
-    for (const existingCertificate of containerAppContext.certificates) {
-        const { properties } = existingCertificate;
-        if (properties == null) {
-            continue;
-        }
-        if (properties.subjectName === fqdn) {
-            return true;
-        }
-        if (properties.subjectAlternativeNames?.includes(fqdn)) {
-            return true;
-        }
-    }
-    return false;
-};
-exports.hasExistingCertificate = hasExistingCertificate;
 
 
 /***/ }),
@@ -62030,7 +62006,7 @@ const config = (0, config_1.getConfig)(values.config === 'env' ? config_1.Config
     process.exit(0);
 })
     .catch((error) => {
-    core.setFailed(error.message);
+    core.setFailed(error);
     process.exit(1);
 });
 
@@ -62050,10 +62026,6 @@ const container_apps_1 = __nccwpck_require__(2138);
 const main = async (config) => {
     const { dnsClient, containerAppsClient } = (0, clients_1.createClients)(config);
     const containerAppContext = await (0, container_apps_1.getContainerAppContext)(containerAppsClient, config);
-    if (await (0, container_apps_1.hasExistingCertificate)(containerAppContext, config)) {
-        console.log(`Certificate for ${config.fqdn} already exists, nothing to do.`);
-        return;
-    }
     await (0, actions_1.runAction)(`Checking that DNS alias record ${config.fqdn} exists and is valid`, async () => {
         await (0, actions_1.validateAliasRecord)(config, dnsClient, containerAppContext);
     });
@@ -62061,13 +62033,13 @@ const main = async (config) => {
         await (0, actions_1.validateVerificationRecord)(config, dnsClient, containerAppContext);
     });
     await (0, actions_1.runAction)(`Binding hostname ${config.fqdn} to container app ${config.containerAppName}`, async () => {
-        await (0, actions_1.bindHostname)(config, containerAppsClient.containerApps);
+        await (0, actions_1.bindHostname)(config, containerAppsClient.containerApps, containerAppContext);
     });
     const certificate = await (0, actions_1.runAction)(`Generating certificate for ${config.fqdn}`, async () => {
-        return await (0, actions_1.generateCertificate)(config, containerAppsClient.managedCertificates);
+        return await (0, actions_1.generateCertificate)(config, containerAppsClient.managedCertificates, containerAppContext);
     });
     await (0, actions_1.runAction)(`Binding certificate for ${config.fqdn} to container app ${config.containerAppName}`, async () => {
-        await (0, actions_1.bindCertificate)(config, containerAppsClient.containerApps, certificate);
+        await (0, actions_1.bindHostname)(config, containerAppsClient.containerApps, containerAppContext, certificate);
     });
 };
 exports.main = main;

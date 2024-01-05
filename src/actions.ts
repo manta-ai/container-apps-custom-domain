@@ -1,4 +1,10 @@
-import { ContainerApp, ContainerApps, ManagedCertificate, ManagedCertificates } from '@azure/arm-appcontainers';
+import {
+  ContainerApp,
+  ContainerApps,
+  CustomDomain,
+  ManagedCertificate,
+  ManagedCertificates
+} from '@azure/arm-appcontainers';
 import { DnsManagementClient } from '@azure/arm-dns';
 import { Config } from './config';
 import { ContainerAppContext } from './container-apps';
@@ -15,18 +21,29 @@ export const runAction = async <T>(message: string, action: () => Promise<T>): P
   }
 };
 
-export const bindHostname = async (config: Config, containerApps: ContainerApps): Promise<void> => {
+export const bindHostname = async (
+  config: Config,
+  containerApps: ContainerApps,
+  containerAppContext: ContainerAppContext,
+  certificate?: ManagedCertificate
+): Promise<void> => {
+  const bindingType = certificate ? 'SniEnabled' : 'Disabled';
+  const customDomain: CustomDomain = {
+    name: config.fqdn,
+    certificateId: certificate?.id,
+    bindingType
+  };
+
+  if (containerAppContext.customDomains.some(domain => domain.name === customDomain.name)) {
+    return;
+  }
+
+  const customDomains: CustomDomain[] = [...containerAppContext.customDomains, customDomain];
+
   const containerAppEnvelope: ContainerApp = {
     location: config.region,
     configuration: {
-      ingress: {
-        customDomains: [
-          {
-            name: config.fqdn,
-            bindingType: 'Disabled'
-          }
-        ]
-      }
+      ingress: { customDomains }
     }
   };
 
@@ -39,8 +56,19 @@ export const bindHostname = async (config: Config, containerApps: ContainerApps)
 
 export const generateCertificate = async (
   config: Config,
-  managedCertificates: ManagedCertificates
+  managedCertificates: ManagedCertificates,
+  containerAppContext: ContainerAppContext
 ): Promise<ManagedCertificate> => {
+  const existingCertificate = containerAppContext.certificates.find(
+    certificate =>
+      certificate.properties?.subjectName === config.fqdn ||
+      certificate.properties?.subjectAlternativeNames?.includes(config.fqdn)
+  );
+
+  if (existingCertificate != null) {
+    return existingCertificate;
+  }
+
   const timestamp = Math.floor(Date.now() / 1000);
   const certificateName = `${config.containerAppName}-mc-${timestamp}`;
   const managedCertificateEnvelope: ManagedCertificate = {
@@ -56,33 +84,6 @@ export const generateCertificate = async (
     config.containerAppEnvironmentName,
     certificateName,
     { managedCertificateEnvelope }
-  );
-};
-
-export const bindCertificate = async (
-  config: Config,
-  containerApps: ContainerApps,
-  certificate: ManagedCertificate
-) => {
-  const containerAppEnvelope: ContainerApp = {
-    location: config.region,
-    configuration: {
-      ingress: {
-        customDomains: [
-          {
-            certificateId: certificate.id,
-            name: config.fqdn,
-            bindingType: 'SniEnabled'
-          }
-        ]
-      }
-    }
-  };
-
-  await containerApps.beginUpdateAndWait(
-    config.containerAppResourceGroupName,
-    config.containerAppName,
-    containerAppEnvelope
   );
 };
 
