@@ -30329,6 +30329,392 @@ module.exports = (object, propertyName, fn) => {
 
 /***/ }),
 
+/***/ 4227:
+/***/ ((__unused_webpack_module, __unused_webpack_exports, __nccwpck_require__) => {
+
+(function () {
+  (__nccwpck_require__(2437).config)(
+    Object.assign(
+      {},
+      __nccwpck_require__(3730),
+      __nccwpck_require__(5478)(process.argv)
+    )
+  )
+})()
+
+
+/***/ }),
+
+/***/ 5478:
+/***/ ((module) => {
+
+const re = /^dotenv_config_(encoding|path|debug|override|DOTENV_KEY)=(.+)$/
+
+module.exports = function optionMatcher (args) {
+  return args.reduce(function (acc, cur) {
+    const matches = cur.match(re)
+    if (matches) {
+      acc[matches[1]] = matches[2]
+    }
+    return acc
+  }, {})
+}
+
+
+/***/ }),
+
+/***/ 3730:
+/***/ ((module) => {
+
+// ../config.js accepts options via environment variables
+const options = {}
+
+if (process.env.DOTENV_CONFIG_ENCODING != null) {
+  options.encoding = process.env.DOTENV_CONFIG_ENCODING
+}
+
+if (process.env.DOTENV_CONFIG_PATH != null) {
+  options.path = process.env.DOTENV_CONFIG_PATH
+}
+
+if (process.env.DOTENV_CONFIG_DEBUG != null) {
+  options.debug = process.env.DOTENV_CONFIG_DEBUG
+}
+
+if (process.env.DOTENV_CONFIG_OVERRIDE != null) {
+  options.override = process.env.DOTENV_CONFIG_OVERRIDE
+}
+
+if (process.env.DOTENV_CONFIG_DOTENV_KEY != null) {
+  options.DOTENV_KEY = process.env.DOTENV_CONFIG_DOTENV_KEY
+}
+
+module.exports = options
+
+
+/***/ }),
+
+/***/ 2437:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
+
+const fs = __nccwpck_require__(7147)
+const path = __nccwpck_require__(1017)
+const os = __nccwpck_require__(2037)
+const crypto = __nccwpck_require__(6113)
+const packageJson = __nccwpck_require__(9968)
+
+const version = packageJson.version
+
+const LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/mg
+
+// Parse src into an Object
+function parse (src) {
+  const obj = {}
+
+  // Convert buffer to string
+  let lines = src.toString()
+
+  // Convert line breaks to same format
+  lines = lines.replace(/\r\n?/mg, '\n')
+
+  let match
+  while ((match = LINE.exec(lines)) != null) {
+    const key = match[1]
+
+    // Default undefined or null to empty string
+    let value = (match[2] || '')
+
+    // Remove whitespace
+    value = value.trim()
+
+    // Check if double quoted
+    const maybeQuote = value[0]
+
+    // Remove surrounding quotes
+    value = value.replace(/^(['"`])([\s\S]*)\1$/mg, '$2')
+
+    // Expand newlines if double quoted
+    if (maybeQuote === '"') {
+      value = value.replace(/\\n/g, '\n')
+      value = value.replace(/\\r/g, '\r')
+    }
+
+    // Add to object
+    obj[key] = value
+  }
+
+  return obj
+}
+
+function _parseVault (options) {
+  const vaultPath = _vaultPath(options)
+
+  // Parse .env.vault
+  const result = DotenvModule.configDotenv({ path: vaultPath })
+  if (!result.parsed) {
+    throw new Error(`MISSING_DATA: Cannot parse ${vaultPath} for an unknown reason`)
+  }
+
+  // handle scenario for comma separated keys - for use with key rotation
+  // example: DOTENV_KEY="dotenv://:key_1234@dotenv.org/vault/.env.vault?environment=prod,dotenv://:key_7890@dotenv.org/vault/.env.vault?environment=prod"
+  const keys = _dotenvKey(options).split(',')
+  const length = keys.length
+
+  let decrypted
+  for (let i = 0; i < length; i++) {
+    try {
+      // Get full key
+      const key = keys[i].trim()
+
+      // Get instructions for decrypt
+      const attrs = _instructions(result, key)
+
+      // Decrypt
+      decrypted = DotenvModule.decrypt(attrs.ciphertext, attrs.key)
+
+      break
+    } catch (error) {
+      // last key
+      if (i + 1 >= length) {
+        throw error
+      }
+      // try next key
+    }
+  }
+
+  // Parse decrypted .env string
+  return DotenvModule.parse(decrypted)
+}
+
+function _log (message) {
+  console.log(`[dotenv@${version}][INFO] ${message}`)
+}
+
+function _warn (message) {
+  console.log(`[dotenv@${version}][WARN] ${message}`)
+}
+
+function _debug (message) {
+  console.log(`[dotenv@${version}][DEBUG] ${message}`)
+}
+
+function _dotenvKey (options) {
+  // prioritize developer directly setting options.DOTENV_KEY
+  if (options && options.DOTENV_KEY && options.DOTENV_KEY.length > 0) {
+    return options.DOTENV_KEY
+  }
+
+  // secondary infra already contains a DOTENV_KEY environment variable
+  if (process.env.DOTENV_KEY && process.env.DOTENV_KEY.length > 0) {
+    return process.env.DOTENV_KEY
+  }
+
+  // fallback to empty string
+  return ''
+}
+
+function _instructions (result, dotenvKey) {
+  // Parse DOTENV_KEY. Format is a URI
+  let uri
+  try {
+    uri = new URL(dotenvKey)
+  } catch (error) {
+    if (error.code === 'ERR_INVALID_URL') {
+      throw new Error('INVALID_DOTENV_KEY: Wrong format. Must be in valid uri format like dotenv://:key_1234@dotenv.org/vault/.env.vault?environment=development')
+    }
+
+    throw error
+  }
+
+  // Get decrypt key
+  const key = uri.password
+  if (!key) {
+    throw new Error('INVALID_DOTENV_KEY: Missing key part')
+  }
+
+  // Get environment
+  const environment = uri.searchParams.get('environment')
+  if (!environment) {
+    throw new Error('INVALID_DOTENV_KEY: Missing environment part')
+  }
+
+  // Get ciphertext payload
+  const environmentKey = `DOTENV_VAULT_${environment.toUpperCase()}`
+  const ciphertext = result.parsed[environmentKey] // DOTENV_VAULT_PRODUCTION
+  if (!ciphertext) {
+    throw new Error(`NOT_FOUND_DOTENV_ENVIRONMENT: Cannot locate environment ${environmentKey} in your .env.vault file.`)
+  }
+
+  return { ciphertext, key }
+}
+
+function _vaultPath (options) {
+  let dotenvPath = path.resolve(process.cwd(), '.env')
+
+  if (options && options.path && options.path.length > 0) {
+    dotenvPath = options.path
+  }
+
+  // Locate .env.vault
+  return dotenvPath.endsWith('.vault') ? dotenvPath : `${dotenvPath}.vault`
+}
+
+function _resolveHome (envPath) {
+  return envPath[0] === '~' ? path.join(os.homedir(), envPath.slice(1)) : envPath
+}
+
+function _configVault (options) {
+  _log('Loading env from encrypted .env.vault')
+
+  const parsed = DotenvModule._parseVault(options)
+
+  let processEnv = process.env
+  if (options && options.processEnv != null) {
+    processEnv = options.processEnv
+  }
+
+  DotenvModule.populate(processEnv, parsed, options)
+
+  return { parsed }
+}
+
+function configDotenv (options) {
+  let dotenvPath = path.resolve(process.cwd(), '.env')
+  let encoding = 'utf8'
+  const debug = Boolean(options && options.debug)
+
+  if (options) {
+    if (options.path != null) {
+      dotenvPath = _resolveHome(options.path)
+    }
+    if (options.encoding != null) {
+      encoding = options.encoding
+    }
+  }
+
+  try {
+    // Specifying an encoding returns a string instead of a buffer
+    const parsed = DotenvModule.parse(fs.readFileSync(dotenvPath, { encoding }))
+
+    let processEnv = process.env
+    if (options && options.processEnv != null) {
+      processEnv = options.processEnv
+    }
+
+    DotenvModule.populate(processEnv, parsed, options)
+
+    return { parsed }
+  } catch (e) {
+    if (debug) {
+      _debug(`Failed to load ${dotenvPath} ${e.message}`)
+    }
+
+    return { error: e }
+  }
+}
+
+// Populates process.env from .env file
+function config (options) {
+  const vaultPath = _vaultPath(options)
+
+  // fallback to original dotenv if DOTENV_KEY is not set
+  if (_dotenvKey(options).length === 0) {
+    return DotenvModule.configDotenv(options)
+  }
+
+  // dotenvKey exists but .env.vault file does not exist
+  if (!fs.existsSync(vaultPath)) {
+    _warn(`You set DOTENV_KEY but you are missing a .env.vault file at ${vaultPath}. Did you forget to build it?`)
+
+    return DotenvModule.configDotenv(options)
+  }
+
+  return DotenvModule._configVault(options)
+}
+
+function decrypt (encrypted, keyStr) {
+  const key = Buffer.from(keyStr.slice(-64), 'hex')
+  let ciphertext = Buffer.from(encrypted, 'base64')
+
+  const nonce = ciphertext.slice(0, 12)
+  const authTag = ciphertext.slice(-16)
+  ciphertext = ciphertext.slice(12, -16)
+
+  try {
+    const aesgcm = crypto.createDecipheriv('aes-256-gcm', key, nonce)
+    aesgcm.setAuthTag(authTag)
+    return `${aesgcm.update(ciphertext)}${aesgcm.final()}`
+  } catch (error) {
+    const isRange = error instanceof RangeError
+    const invalidKeyLength = error.message === 'Invalid key length'
+    const decryptionFailed = error.message === 'Unsupported state or unable to authenticate data'
+
+    if (isRange || invalidKeyLength) {
+      const msg = 'INVALID_DOTENV_KEY: It must be 64 characters long (or more)'
+      throw new Error(msg)
+    } else if (decryptionFailed) {
+      const msg = 'DECRYPTION_FAILED: Please check your DOTENV_KEY'
+      throw new Error(msg)
+    } else {
+      console.error('Error: ', error.code)
+      console.error('Error: ', error.message)
+      throw error
+    }
+  }
+}
+
+// Populate process.env with parsed values
+function populate (processEnv, parsed, options = {}) {
+  const debug = Boolean(options && options.debug)
+  const override = Boolean(options && options.override)
+
+  if (typeof parsed !== 'object') {
+    throw new Error('OBJECT_REQUIRED: Please check the processEnv argument being passed to populate')
+  }
+
+  // Set process.env
+  for (const key of Object.keys(parsed)) {
+    if (Object.prototype.hasOwnProperty.call(processEnv, key)) {
+      if (override === true) {
+        processEnv[key] = parsed[key]
+      }
+
+      if (debug) {
+        if (override === true) {
+          _debug(`"${key}" is already defined and WAS overwritten`)
+        } else {
+          _debug(`"${key}" is already defined and was NOT overwritten`)
+        }
+      }
+    } else {
+      processEnv[key] = parsed[key]
+    }
+  }
+}
+
+const DotenvModule = {
+  configDotenv,
+  _configVault,
+  _parseVault,
+  config,
+  decrypt,
+  parse,
+  populate
+}
+
+module.exports.configDotenv = DotenvModule.configDotenv
+module.exports._configVault = DotenvModule._configVault
+module.exports._parseVault = DotenvModule._parseVault
+module.exports.config = DotenvModule.config
+module.exports.decrypt = DotenvModule.decrypt
+module.exports.parse = DotenvModule.parse
+module.exports.populate = DotenvModule.populate
+
+module.exports = DotenvModule
+
+
+/***/ }),
+
 /***/ 1728:
 /***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
@@ -61309,6 +61695,94 @@ try {
 
 /***/ }),
 
+/***/ 7014:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.validateVerificationRecord = exports.validateAliasRecord = exports.bindCertificate = exports.generateCertificate = exports.bindHostname = exports.runAction = void 0;
+const runAction = async (message, action) => {
+    process.stdout.write(`${message}...`);
+    try {
+        const value = await action();
+        process.stdout.write('success\n');
+        return value;
+    }
+    catch (error) {
+        process.stdout.write('failed\n');
+        throw error;
+    }
+};
+exports.runAction = runAction;
+const bindHostname = async (config, containerApps) => {
+    const containerAppEnvelope = {
+        location: config.region,
+        configuration: {
+            ingress: {
+                customDomains: [
+                    {
+                        name: config.fqdn,
+                        bindingType: 'Disabled'
+                    }
+                ]
+            }
+        }
+    };
+    await containerApps.beginUpdateAndWait(config.containerAppResourceGroupName, config.containerAppName, containerAppEnvelope);
+};
+exports.bindHostname = bindHostname;
+const generateCertificate = async (config, managedCertificates) => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const certificateName = `${config.containerAppName}-mc-${timestamp}`;
+    const managedCertificateEnvelope = {
+        location: config.region,
+        properties: {
+            subjectName: config.fqdn,
+            domainControlValidation: 'CNAME'
+        }
+    };
+    return await managedCertificates.beginCreateOrUpdateAndWait(config.containerAppResourceGroupName, config.containerAppEnvironmentName, certificateName, { managedCertificateEnvelope });
+};
+exports.generateCertificate = generateCertificate;
+const bindCertificate = async (config, containerApps, certificate) => {
+    const containerAppEnvelope = {
+        location: config.region,
+        configuration: {
+            ingress: {
+                customDomains: [
+                    {
+                        certificateId: certificate.id,
+                        name: config.fqdn,
+                        bindingType: 'SniEnabled'
+                    }
+                ]
+            }
+        }
+    };
+    await containerApps.beginUpdateAndWait(config.containerAppResourceGroupName, config.containerAppName, containerAppEnvelope);
+};
+exports.bindCertificate = bindCertificate;
+const validateAliasRecord = async (config, dns, containerAppContext) => {
+    await dns.recordSets.createOrUpdate(config.dnsResourceGroupName, config.dnsZoneName, config.dnsName, 'CNAME', {
+        cnameRecord: {
+            cname: `${config.containerAppName}.${containerAppContext.defaultDomain}`
+        },
+        ttl: 300
+    });
+};
+exports.validateAliasRecord = validateAliasRecord;
+const validateVerificationRecord = async (config, dns, containerAppContext) => {
+    await dns.recordSets.createOrUpdate(config.dnsResourceGroupName, config.dnsZoneName, `asuid.${config.dnsName}`, 'TXT', {
+        txtRecords: [{ value: [containerAppContext.customDomainVerificationId] }],
+        ttl: 3600
+    });
+};
+exports.validateVerificationRecord = validateVerificationRecord;
+
+
+/***/ }),
+
 /***/ 4650:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -61353,11 +61827,106 @@ const createClients = (config) => {
     }
     const credentials = new identity_1.DefaultAzureCredential();
     return {
-        dns: new arm_dns_1.DnsManagementClient(credentials, subscriptionId),
-        containerApps: new arm_appcontainers_1.ContainerAppsAPIClient(credentials, subscriptionId)
+        dnsClient: new arm_dns_1.DnsManagementClient(credentials, subscriptionId),
+        containerAppsClient: new arm_appcontainers_1.ContainerAppsAPIClient(credentials, subscriptionId)
     };
 };
 exports.createClients = createClients;
+
+
+/***/ }),
+
+/***/ 6373:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getConfig = exports.ConfigSource = void 0;
+const core = __importStar(__nccwpck_require__(2186));
+__nccwpck_require__(4227);
+var ConfigSource;
+(function (ConfigSource) {
+    ConfigSource["Input"] = "input";
+    ConfigSource["Environment"] = "env";
+})(ConfigSource || (exports.ConfigSource = ConfigSource = {}));
+const getFqdn = (dnsName, dnsZoneName) => `${dnsName}.${dnsZoneName}`;
+const getInputConfig = () => {
+    let subscriptionId = core.getInput('subscription-id');
+    if (subscriptionId.length === 0 && process.env.AZURE_SUBSCRIPTION_ID != null) {
+        subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
+    }
+    if (subscriptionId == null || subscriptionId.length === 0) {
+        throw new Error('Could not find Azure subscription.');
+    }
+    const dnsName = core.getInput('dns-name', { required: true });
+    const dnsZoneName = core.getInput('dns-zone', { required: true });
+    const fqdn = getFqdn(dnsName, dnsZoneName);
+    return {
+        subscriptionId,
+        dnsZoneName,
+        dnsName,
+        fqdn,
+        region: core.getInput('region', { required: true }),
+        dnsResourceGroupName: core.getInput('dns-resource-group-name', { required: true }),
+        containerAppName: core.getInput('container-app-name', { required: true }),
+        containerAppResourceGroupName: core.getInput('container-app-resource-group-name', { required: true }),
+        containerAppEnvironmentName: core.getInput('container-app-environment-name', { required: true })
+    };
+};
+const getEnvironmentVariable = (name) => {
+    const value = process.env[name];
+    if (value == null || value.length === 0) {
+        throw new Error(`Could not find environment variable ${name}.`);
+    }
+    return value;
+};
+const getEnvironmentConfig = () => {
+    const dnsZoneName = getEnvironmentVariable('AZURE_DNS_ZONE_NAME');
+    const dnsName = getEnvironmentVariable('AZURE_DNS_NAME');
+    const fqdn = getFqdn(dnsName, dnsZoneName);
+    return {
+        dnsZoneName,
+        dnsName,
+        fqdn,
+        subscriptionId: getEnvironmentVariable('AZURE_SUBSCRIPTION_ID'),
+        region: getEnvironmentVariable('AZURE_REGION'),
+        dnsResourceGroupName: getEnvironmentVariable('AZURE_DNS_RESOURCE_GROUP_NAME'),
+        containerAppName: getEnvironmentVariable('AZURE_CONTAINER_APP_NAME'),
+        containerAppResourceGroupName: getEnvironmentVariable('AZURE_CONTAINER_APP_RESOURCE_GROUP_NAME'),
+        containerAppEnvironmentName: getEnvironmentVariable('AZURE_CONTAINER_APP_ENVIRONMENT_NAME')
+    };
+};
+const getConfig = (configSource) => {
+    if (configSource === ConfigSource.Environment) {
+        return getEnvironmentConfig();
+    }
+    return getInputConfig();
+};
+exports.getConfig = getConfig;
 
 
 /***/ }),
@@ -61412,34 +61981,6 @@ exports.hasExistingCertificate = hasExistingCertificate;
 
 /***/ }),
 
-/***/ 3255:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.validateDns = void 0;
-const validateDns = async (config, dns, containerAppContext) => {
-    console.log(`Checking that DNS record ${config.fqdn} exists and is valid...`);
-    await dns.recordSets.createOrUpdate(config.dnsResourceGroupName, config.dnsZoneName, config.dnsName, 'CNAME', {
-        cnameRecord: {
-            cname: `${config.containerAppName}.${containerAppContext.defaultDomain}`
-        },
-        ttl: 300
-    });
-    console.log(`Successfully validated ${config.fqdn}.`);
-    console.log(`Checking that DNS record asuid.${config.fqdn} exists and is valid...`);
-    await dns.recordSets.createOrUpdate(config.dnsResourceGroupName, config.dnsZoneName, `asuid.${config.dnsName}`, 'TXT', {
-        txtRecords: [{ value: [containerAppContext.customDomainVerificationId] }],
-        ttl: 3600
-    });
-    console.log(`Successfully validated asuid.${config.fqdn}.`);
-};
-exports.validateDns = validateDns;
-
-
-/***/ }),
-
 /***/ 6144:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -61470,9 +62011,21 @@ var __importStar = (this && this.__importStar) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(2186));
+const node_util_1 = __nccwpck_require__(7261);
 const process = __importStar(__nccwpck_require__(7282));
+const config_1 = __nccwpck_require__(6373);
 const main_1 = __nccwpck_require__(399);
-(0, main_1.main)()
+const { values } = (0, node_util_1.parseArgs)({
+    options: {
+        config: {
+            type: 'string',
+            short: 'c',
+            default: 'input'
+        }
+    }
+});
+const config = (0, config_1.getConfig)(values.config === 'env' ? config_1.ConfigSource.Environment : config_1.ConfigSource.Input);
+(0, main_1.main)(config)
     .then(() => {
     process.exit(0);
 })
@@ -61484,65 +62037,6 @@ const main_1 = __nccwpck_require__(399);
 
 /***/ }),
 
-/***/ 6747:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getConfig = void 0;
-const core = __importStar(__nccwpck_require__(2186));
-const getConfig = () => {
-    let subscriptionId = core.getInput('subscription-id');
-    if (subscriptionId.length === 0 && process.env.AZURE_SUBSCRIPTION_ID != null) {
-        subscriptionId = process.env.AZURE_SUBSCRIPTION_ID;
-    }
-    if (subscriptionId == null || subscriptionId.length === 0) {
-        throw new Error('Could not find Azure subscription.');
-    }
-    const dnsName = core.getInput('dns-name', { required: true });
-    const dnsZoneName = core.getInput('dns-zone', { required: true });
-    const fqdn = `${dnsName}.${dnsZoneName}`;
-    return {
-        subscriptionId,
-        dnsZoneName,
-        dnsName,
-        fqdn,
-        region: core.getInput('region', { required: true }),
-        dnsResourceGroupName: core.getInput('dns-resource-group-name', { required: true }),
-        containerAppName: core.getInput('container-app-name', { required: true }),
-        containerAppResourceGroupName: core.getInput('container-app-resource-group-name', { required: true }),
-        containerAppEnvironmentName: core.getInput('container-app-environment-name', { required: true })
-    };
-};
-exports.getConfig = getConfig;
-
-
-/***/ }),
-
 /***/ 399:
 /***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
@@ -61550,48 +62044,31 @@ exports.getConfig = getConfig;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.main = void 0;
+const actions_1 = __nccwpck_require__(7014);
 const clients_1 = __nccwpck_require__(4650);
 const container_apps_1 = __nccwpck_require__(2138);
-const dns_1 = __nccwpck_require__(3255);
-const input_1 = __nccwpck_require__(6747);
-const main = async () => {
-    const config = (0, input_1.getConfig)();
-    const { dns, containerApps } = (0, clients_1.createClients)(config);
-    const containerAppContext = await (0, container_apps_1.getContainerAppContext)(containerApps, config);
+const main = async (config) => {
+    const { dnsClient, containerAppsClient } = (0, clients_1.createClients)(config);
+    const containerAppContext = await (0, container_apps_1.getContainerAppContext)(containerAppsClient, config);
     if (await (0, container_apps_1.hasExistingCertificate)(containerAppContext, config)) {
         console.log(`Certificate for ${config.fqdn} already exists, nothing to do.`);
         return;
     }
-    await (0, dns_1.validateDns)(config, dns, containerAppContext);
-    console.log(`Creating certificate for ${config.fqdn}.`);
-    const timestamp = Math.floor(Date.now() / 1000);
-    const certificateName = `${config.containerAppName}-mc-${timestamp}`;
-    const certificate = await containerApps.managedCertificates.beginCreateOrUpdateAndWait(config.containerAppResourceGroupName, config.containerAppEnvironmentName, certificateName, {
-        managedCertificateEnvelope: {
-            location: config.region,
-            properties: {
-                subjectName: config.fqdn,
-                domainControlValidation: 'CNAME'
-            }
-        }
+    await (0, actions_1.runAction)(`Checking that DNS alias record ${config.fqdn} exists and is valid`, async () => {
+        await (0, actions_1.validateAliasRecord)(config, dnsClient, containerAppContext);
     });
-    console.log(`Successfully created certificate for ${config.fqdn}.`);
-    console.log(`Binding certificate for ${config.fqdn} to container app ${config.containerAppName}.`);
-    await containerApps.containerApps.beginUpdateAndWait(config.containerAppResourceGroupName, config.containerAppName, {
-        location: config.region,
-        configuration: {
-            ingress: {
-                customDomains: [
-                    {
-                        certificateId: certificate.id,
-                        name: config.fqdn,
-                        bindingType: 'SniEnabled'
-                    }
-                ]
-            }
-        }
+    await (0, actions_1.runAction)(`Checking that DNS verification record asuid.${config.fqdn} exists and is valid`, async () => {
+        await (0, actions_1.validateVerificationRecord)(config, dnsClient, containerAppContext);
     });
-    console.log(`Successfully bound domain ${config.fqdn} to container app ${config.containerAppName}.`);
+    await (0, actions_1.runAction)(`Binding hostname ${config.fqdn} to container app ${config.containerAppName}`, async () => {
+        await (0, actions_1.bindHostname)(config, containerAppsClient.containerApps);
+    });
+    const certificate = await (0, actions_1.runAction)(`Generating certificate for ${config.fqdn}`, async () => {
+        return await (0, actions_1.generateCertificate)(config, containerAppsClient.managedCertificates);
+    });
+    await (0, actions_1.runAction)(`Binding certificate for ${config.fqdn} to container app ${config.containerAppName}`, async () => {
+        await (0, actions_1.bindCertificate)(config, containerAppsClient.containerApps, certificate);
+    });
 };
 exports.main = main;
 
@@ -76471,6 +76948,14 @@ class NetworkUtils {
 exports.NetworkUtils = NetworkUtils;
 //# sourceMappingURL=NetworkUtils.cjs.map
 
+
+/***/ }),
+
+/***/ 9968:
+/***/ ((module) => {
+
+"use strict";
+module.exports = JSON.parse('{"name":"dotenv","version":"16.3.1","description":"Loads environment variables from .env file","main":"lib/main.js","types":"lib/main.d.ts","exports":{".":{"types":"./lib/main.d.ts","require":"./lib/main.js","default":"./lib/main.js"},"./config":"./config.js","./config.js":"./config.js","./lib/env-options":"./lib/env-options.js","./lib/env-options.js":"./lib/env-options.js","./lib/cli-options":"./lib/cli-options.js","./lib/cli-options.js":"./lib/cli-options.js","./package.json":"./package.json"},"scripts":{"dts-check":"tsc --project tests/types/tsconfig.json","lint":"standard","lint-readme":"standard-markdown","pretest":"npm run lint && npm run dts-check","test":"tap tests/*.js --100 -Rspec","prerelease":"npm test","release":"standard-version"},"repository":{"type":"git","url":"git://github.com/motdotla/dotenv.git"},"funding":"https://github.com/motdotla/dotenv?sponsor=1","keywords":["dotenv","env",".env","environment","variables","config","settings"],"readmeFilename":"README.md","license":"BSD-2-Clause","devDependencies":{"@definitelytyped/dtslint":"^0.0.133","@types/node":"^18.11.3","decache":"^4.6.1","sinon":"^14.0.1","standard":"^17.0.0","standard-markdown":"^7.1.0","standard-version":"^9.5.0","tap":"^16.3.0","tar":"^6.1.11","typescript":"^4.8.4"},"engines":{"node":">=12"},"browser":{"fs":false}}');
 
 /***/ })
 

@@ -2,11 +2,11 @@ import { ContainerAppsAPIClient } from '@azure/arm-appcontainers';
 import { DefaultAzureCredential } from '@azure/identity';
 import { DnsManagementClient } from '@azure/arm-dns';
 import * as core from '@actions/core';
-import { Config } from './input';
+import { Config } from './config';
 
 interface Clients {
-  dns: DnsManagementClient;
-  containerApps: ContainerAppsAPIClient;
+  dnsClient: DnsManagementClient;
+  containerAppsClient: ContainerAppsAPIClient;
 }
 
 export const createClients = (config: Config): Clients => {
@@ -23,7 +23,7 @@ export const createClients = (config: Config): Clients => {
   const credentials = new DefaultAzureCredential();
 
   return {
-    dns: new DnsManagementClient(credentials, subscriptionId),
-    containerApps: new ContainerAppsAPIClient(credentials, subscriptionId)
+    dnsClient: new DnsManagementClient(credentials, subscriptionId),
+    containerAppsClient: new ContainerAppsAPIClient(credentials, subscriptionId)
   };
 };
